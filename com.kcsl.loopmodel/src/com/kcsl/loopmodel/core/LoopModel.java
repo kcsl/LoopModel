@@ -124,8 +124,8 @@ public class LoopModel {
 	}
 
 	private void verifyLoop(Node loopHeader) {
-		Q loopBody = getLoopBody(loopHeader);
 		Node function = CommonQueries.getContainingFunction(loopHeader);
+		Q loopBody = getLoopBody(loopHeader, CommonQueries.cfg(function));
 		funs.add(function);
 		String fName = function.getAttr(XCSG.name).toString();
 		String sourceFilePath = Utils.getCSourceFilePath(loopHeader);
@@ -282,8 +282,12 @@ public class LoopModel {
 		}
 	}
 
-	private Q getLoopBody(Node loopHeader) {
+	private Q getLoopBody(Node loopHeader, Q cfg) {
+		AtlasSet<Edge> backEdges = cfg.edges(XCSG.ControlFlowBackEdge, "PCGBackEdge").eval().edges();
 		AtlasSet<Node> loopMembers = Common.toQ(loopHeader).reverseOn(dominanceFrontierEdges).eval().nodes();
+		Q dag = cfg.differenceEdges(Common.toQ(backEdges));
+		loopMembers = Common.toQ(loopMembers).difference(dag.reverse(Common.toQ(loopHeader)))
+				.union(Common.toQ(loopHeader)).eval().nodes();
 		return Common.toQ(loopMembers);
 	}
 
