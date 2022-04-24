@@ -144,8 +144,10 @@ public class LoopModel {
 				Utils.saveGraph(loopHeader, function, Common.empty(), Common.empty(), Common.empty(), path, "P",
 						"Crazy");
 			}
-		}
-		verifyLoop(loopHeader, function, loopBody, fName, loopID, loopLineNumber, sourceFilePath);
+		} else {
+			verifyLoop(loopHeader, function, loopBody, fName, loopID, loopLineNumber, sourceFilePath);
+		}	
+		
 	}
 
 	private void verifyLoop(Node loopHeader, Node function, Q loopBody, String fName, String loopID,
