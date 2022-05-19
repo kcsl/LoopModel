@@ -4,6 +4,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Path;
 
+import com.ensoftcorp.atlas.core.db.graph.Edge;
 import com.ensoftcorp.atlas.core.db.graph.Node;
 import com.ensoftcorp.atlas.core.db.set.AtlasHashSet;
 import com.ensoftcorp.atlas.core.db.set.AtlasSet;
@@ -11,6 +12,7 @@ import com.ensoftcorp.atlas.core.query.Q;
 import com.ensoftcorp.atlas.core.query.Query;
 import com.ensoftcorp.atlas.core.script.Common;
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
+import com.ensoftcorp.atlas.ui.viewer.graph.DisplayUtil;
 import com.ensoftcorp.open.c.commons.analysis.CommonQueries;
 import com.ensoftcorp.open.commons.algorithms.DominanceAnalysis;
 import com.ensoftcorp.open.commons.analysis.SetDefinitions;
@@ -28,10 +30,12 @@ public class LoopModel {
 	private Q callEdges = Common.empty();
 	private Q cfEdges = Common.empty();
 	private Q invokedEdges = Common.empty();
+
+	private AtlasSet<Node> callSiteEvents;
 	private String event1 = "kmalloc";
 	private String event2 = "kfree";
 	private AtlasSet<Node> firstEventContainingFunctions = new AtlasHashSet<Node>();
-	private Q dominanceFrontierEdges = Common.empty();
+	private Q dominanceEdges = Common.empty();
 	long problematicLoopNum = 0L;
 	long firstEeventInsideLoopNum = 0L;
 	long bothEventInsideLoopNum = 0L;
@@ -39,12 +43,10 @@ public class LoopModel {
 	long firstEeventInsideLoopSecondNotInsideFunctionNum = 0L;
 	AtlasSet<Node> kmalloconly;
 	AtlasSet<Node> kfreeonly;
+	LoopBody loopbody;
 	private AtlasSet<Node> funs = new AtlasHashSet<Node>();
 	private AtlasSet<Node> problematicFuns = new AtlasHashSet<Node>();
-	private boolean saveGraph = false;
-
 	LoopModel() {
-		saveGraph = false;
 		nodes = SetDefinitions.app().contained();
 		bothEventInsideLoopContainingFunctions = new AtlasHashSet<Node>();
 		firstEventInsideLoopContainingFunctions = new AtlasHashSet<Node>();
@@ -52,8 +54,10 @@ public class LoopModel {
 		firstEventInsideLoopSecondEventNotInsideFunctionContainingFunctions = new AtlasHashSet<Node>();
 		callEdges = Query.universe().edges(XCSG.Call);
 		cfEdges = Query.universe().edges(XCSG.ControlFlow_Edge);
-		dominanceFrontierEdges = DominanceAnalysis.getDominanceFrontierEdges();
+		callSiteEvents = new AtlasHashSet<Node>();
+		dominanceEdges = DominanceAnalysis.getDominatorTreeEdges();
 		invokedEdges = Common.universe().edges(XCSG.InvokedFunction, XCSG.InvokedSignature);
+		loopbody = new LoopBody();
 		preprocess();
 	}
 
@@ -69,20 +73,19 @@ public class LoopModel {
 		for (Node loopHeader : loops) {
 			model.verifyLoop(loopHeader);
 		}
-
-		System.out.println("#Functions: " + model.nodes.nodes(XCSG.Function).eval().nodes().size());
-		System.out.println("#Functions have loops: " + model.funs.size());
-		System.out.println("#Functions have problematic loops: " + model.problematicFuns.size());
-		System.out.println("#Total Loops: " + loops.size());
-		System.out.println("#Total Problemtaic Loops: " + model.problematicLoopNum);
-		System.out.println("#Total Loops having first event inside loop: " + model.firstEeventInsideLoopNum);
-		System.out.println("#Total Loops having both events inside loop: " + model.bothEventInsideLoopNum);
-		System.out.println("#Total Loops having first event inside loop and second event inside function: "
-				+ model.firstEeventInsideLoopSecondInsideFunctionNum);
-		System.out.println("#Total Loops having first event inside loop and second event not inside the function: "
-				+ model.firstEeventInsideLoopSecondNotInsideFunctionNum);
-
-		System.out.println("#Functions Containing first events: " + model.firstEventContainingFunctions.size());
+		
+		System.out.println("#Functions: "+ model.nodes.nodes(XCSG.Function).eval().nodes().size());
+		System.out.println("#Functions have loops: "+ model.funs.size());
+		System.out.println("#Functions have problematic loops: "+ model.problematicFuns.size());
+		System.out.println("#Total Loops: "+loops.size());
+		System.out.println("#Total Problemtaic Loops: "+model.problematicLoopNum);
+		System.out.println("#Total Loops having first event inside loop: "+model.firstEeventInsideLoopNum);
+		System.out.println("#Total Loops having both events inside loop: "+ model.bothEventInsideLoopNum);
+		System.out.println("#Total Loops having first event inside loop and second event inside function: "+model.firstEeventInsideLoopSecondInsideFunctionNum);
+		System.out.println("#Total Loops having first event inside loop and second event not inside the function: "+model.firstEeventInsideLoopSecondNotInsideFunctionNum);
+		
+		System.out.println("#Functions Containing first events: "
+				+ model.firstEventContainingFunctions.size());
 		System.out.println("#Functions Containing first events inside loops: "
 				+ model.firstEventInsideLoopContainingFunctions.size());
 		System.out.println("#Functions Containing both events inside loops: "
@@ -107,16 +110,16 @@ public class LoopModel {
 	private Node isLoopProblematic(Q loopBody, Node header) {
 		Node problematicNode = null;
 		AtlasSet<Node> loopMembers = loopBody.eval().nodes();
-
+		
 		for (Node loopMember : loopMembers) {
-			if (loopMember.equals(header))
+			if(loopMember.equals(header))
 				continue;
 			AtlasSet<Node> preds = cfEdges.predecessors(Common.toQ(loopMember)).eval().nodes();
-
+			
 			for (Node pred : preds) {
 				if (!loopMembers.contains(pred)) {
 					problematicNode = loopMember;
-					// DisplayUtil.displayGraph(Common.toQ(loopMembers).eval());
+					DisplayUtil.displayGraph(Common.toQ(loopMembers).eval());
 				}
 			}
 		}
@@ -125,7 +128,7 @@ public class LoopModel {
 
 	private void verifyLoop(Node loopHeader) {
 		Node function = CommonQueries.getContainingFunction(loopHeader);
-		Q loopBody = getLoopBody(loopHeader, CommonQueries.cfg(function));
+		Q loopBody = loopbody.getLoopBody(Common.toQ(loopHeader), CommonQueries.cfg(function));
 		funs.add(function);
 		String fName = function.getAttr(XCSG.name).toString();
 		String sourceFilePath = Utils.getCSourceFilePath(loopHeader);
@@ -139,31 +142,31 @@ public class LoopModel {
 			Long nodeLineNumber = Utils.getLineNumber(problematicNode);
 			FileWriter fw = MemoryVerificationProperties.getOutputProblematicLoopResultFileWriter();
 			this.save2ProblematicLoopFile(fw, fName, loopID, loopLineNumber, nodeID, nodeLineNumber, sourceFilePath);
-			if (saveGraph) {
-				Path path = MemoryVerificationProperties.getProblematicLoopOutputDirectory();
-				Utils.saveGraph(loopHeader, function, Common.empty(), Common.empty(), Common.empty(), path, "P",
-						"Crazy");
+			if(MemoryVerificationProperties.isSaveVerificationGraphs()) {
+			Path path = MemoryVerificationProperties.getProblematicLoopOutputDirectory();
+			Utils.saveGraph(loopHeader, function, Common.empty(), Common.empty(), Common.empty(), path, "P",  "Crazy");
 			}
 		} else {
 			verifyLoop(loopHeader, function, loopBody, fName, loopID, loopLineNumber, sourceFilePath);
-		}	
-		
+		}		
 	}
 
-	private void verifyLoop(Node loopHeader, Node function, Q loopBody, String fName, String loopID,
-			Long loopLineNumber, String sourceFilePath) {
-
+	private void verifyLoop(Node loopHeader, Node function, Q loopBody, String fName, String loopID, Long loopLineNumber,
+			String sourceFilePath) {
+		
 		AtlasSet<Node> callsites = loopBody.children().nodes(XCSG.CallSite).eval().nodes();
+		//AtlasSet<Node> targets = new AtlasHashSet<Node>();
 		int mallocFlag = 0;
 		int freeFlag = 0;
 		AtlasSet<Node> mallocEvents = new AtlasHashSet<Node>();
 		AtlasSet<Node> kfreeEvents = new AtlasHashSet<Node>();
-		AtlasSet<Node> callSiteEvents = new AtlasHashSet<Node>();
-		String signature = "";
+		String signature="";
 		for (Node callsite : callsites) {
 			Node cfNode = Common.toQ(callsite).parent().eval().nodes().one();
 			AtlasSet<Node> tg = invokedEdges.successors(Common.toQ(callsite)).eval().nodes();
+//			targets.addAll(tg);
 			for (Node target : tg) {
+				
 				if (target.getAttr(XCSG.name).toString().equals(event1)) {
 					signature = event1;
 					mallocEvents.add(cfNode);
@@ -171,95 +174,96 @@ public class LoopModel {
 				} else if (target.getAttr(XCSG.name).toString().equals(event2)) {
 					kfreeEvents.add(cfNode);
 					freeFlag = 1;
-				} else if (kmalloconly.contains(target)) {
-					signature = target.getAttr(XCSG.name).toString();
-					callSiteEvents.add(cfNode);
-					mallocFlag = 1;
-				} else if (kfreeonly.contains(target)) {
-					callSiteEvents.add(cfNode);
-					freeFlag = 1;
-				}
-
+				} 
+//				else if(kmalloconly.contains(target)) {
+//				    signature = target.getAttr(XCSG.name).toString();
+//					callSiteEvents.add(cfNode);
+//					mallocFlag = 1;
+//				} else if(kfreeonly.contains(target)) {
+//					callSiteEvents.add(cfNode);
+//					freeFlag = 1;
+//				} 
+				
 			}
 		}
-		if (mallocFlag == 1) {
+		if(mallocFlag == 1) {
 			firstEeventInsideLoopNum++;
 			FileWriter fw = MemoryVerificationProperties.getOutputCFileWriter();
 			this.save2LoopFile(fw, fName, loopID, loopLineNumber, sourceFilePath);
 			firstEventInsideLoopContainingFunctions.add(function);
-			if (saveGraph) {
-				Path path = MemoryVerificationProperties.getCOutputDirectory();
-				Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents),
-						Common.toQ(callSiteEvents), path, "C", signature);
+			if(MemoryVerificationProperties.isSaveVerificationGraphs()) {
+			Path path = MemoryVerificationProperties.getCOutputDirectory();
+			Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents), Common.empty(), path, "C",  signature);
 			}
-
+			
 		}
-
+		
 		if (mallocFlag == 1 && freeFlag == 1) {
 			bothEventInsideLoopNum++;
 			FileWriter fw = MemoryVerificationProperties.getOutputC1FileWriter();
 			this.save2LoopFile(fw, fName, loopID, loopLineNumber, sourceFilePath);
 			bothEventInsideLoopContainingFunctions.add(function);
-			Q cfgTargets = CommonQueries.cfg(function).children().nodes(XCSG.CallSite);
-			for (Node callsite : cfgTargets.eval().nodes()) {
-				Node cfNode = Common.toQ(callsite).parent().eval().nodes().one();
-				if (!cfNode.hasAttr("Toolbox.loopDepth")) {
-					AtlasSet<Node> tg = invokedEdges.successors(Common.toQ(callsite)).eval().nodes();
-					for (Node n : tg) {
+				Q cfgTargets = CommonQueries.cfg(function).children().nodes(XCSG.CallSite);
+				for (Node callsite : cfgTargets.eval().nodes()) {
+					Node cfNode = Common.toQ(callsite).parent().eval().nodes().one();
+					if(!cfNode.hasAttr("Toolbox.loopDepth")) {
+						AtlasSet<Node> tg = invokedEdges.successors(Common.toQ(callsite)).eval().nodes();
+					for(Node n: tg) {
 						if (n.getAttr(XCSG.name).toString().equals("kfree")) {
 							kfreeEvents.add(cfNode);
 							freeFlag = 1;
-						} else if (kfreeonly.contains(n)) {
-							callSiteEvents.add(cfNode);
-							freeFlag = 1;
-						}
+						} 
+//						else if(kfreeonly.contains(n)) {
+//							callSiteEvents.add(cfNode);
+//							freeFlag = 1;
+//						}
 					}
+				  }
 				}
-			}
-			if (saveGraph) {
+				if(MemoryVerificationProperties.isSaveVerificationGraphs()) {
 				Path path = MemoryVerificationProperties.getC1OutputDirectory();
-				Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents),
-						Common.toQ(callSiteEvents), path, "C1", signature);
-			}
-		} else if (mallocFlag == 1 && freeFlag == 0) {
+				Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents), Common.empty(), path, "C1",  signature);
+				}
+		} else if(mallocFlag == 1 && freeFlag == 0) {
 			Q cfgTargets = CommonQueries.cfg(function).children().nodes(XCSG.CallSite);
 			for (Node callsite : cfgTargets.eval().nodes()) {
 				Node cfNode = Common.toQ(callsite).parent().eval().nodes().one();
-				if (!cfNode.hasAttr("Toolbox.loopDepth")) {
+				if(!cfNode.hasAttr("Toolbox.loopDepth")) {
 					AtlasSet<Node> tg = invokedEdges.successors(Common.toQ(callsite)).eval().nodes();
-					for (Node n : tg) {
-						if (n.getAttr(XCSG.name).toString().equals(event2)) {
-							kfreeEvents.add(cfNode);
-							freeFlag = 1;
-						} else if (kfreeonly.contains(n)) {
-							callSiteEvents.add(cfNode);
-							freeFlag = 1;
-						}
-					}
+				for(Node n: tg) {
+					if (n.getAttr(XCSG.name).toString().equals(event2)) {
+						kfreeEvents.add(cfNode);
+						freeFlag = 1;
+					} 
+//					else if(kfreeonly.contains(n)) {	
+//						callSiteEvents.add(cfNode);
+//						freeFlag = 1;
+//					}
 				}
+			  }
 			}
-			if (freeFlag == 1) {
+			if(freeFlag == 1) {
 				firstEeventInsideLoopSecondInsideFunctionNum++;
 				firstEventInsideLoopSecondEventInsideFunctionContainingFunctions.add(function);
 				FileWriter fw = MemoryVerificationProperties.getOutputC2FileWriter();
 				this.save2LoopFile(fw, fName, loopID, loopLineNumber, sourceFilePath);
-				if (saveGraph) {
-					Path path = MemoryVerificationProperties.getC2OutputDirectory();
-					Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents),
-							Common.toQ(callSiteEvents), path, "C2", signature);
+				if(MemoryVerificationProperties.isSaveVerificationGraphs()) {
+				Path path = MemoryVerificationProperties.getC2OutputDirectory();
+				Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents), Common.empty(), path, "C2",  signature);
 				}
 			} else {
+				if(MemoryVerificationProperties.isSaveVerificationGraphs()) {
 				firstEeventInsideLoopSecondNotInsideFunctionNum++;
 				firstEventInsideLoopSecondEventNotInsideFunctionContainingFunctions.add(function);
 				FileWriter fw = MemoryVerificationProperties.getOutputC3FileWriter();
 				this.save2LoopFile(fw, fName, loopID, loopLineNumber, sourceFilePath);
-				if (saveGraph) {
-					Path path = MemoryVerificationProperties.getC3OutputDirectory();
-					Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents),
-							Common.toQ(callSiteEvents), path, "C3", signature);
+				Path path = MemoryVerificationProperties.getC3OutputDirectory();
+				Utils.saveGraph(loopHeader, function, Common.toQ(mallocEvents), Common.toQ(kfreeEvents), Common.empty(), path, "C3",  signature);
 				}
 			}
 		}
+
+
 	}
 
 	private void save2LoopFile(FileWriter fw, String fName, String loopID, Long loopLineNumber, String sourceFilePath) {
@@ -269,6 +273,7 @@ public class LoopModel {
 		} catch (IOException e) {
 			System.err.println("Cannot write to log file.");
 		}
+
 	}
 
 	private void save2ProblematicLoopFile(FileWriter fw, String fName, String loopID, Long loopLineNumber,
@@ -280,17 +285,9 @@ public class LoopModel {
 		} catch (IOException e) {
 			System.err.println("Cannot write to log file.");
 		}
-	}
 
-	private Q getLoopBody(Node loopHeader, Q cfg) {
-		AtlasSet<Edge> backEdges = cfg.edges(XCSG.ControlFlowBackEdge, "PCGBackEdge").eval().edges();
-		AtlasSet<Node> loopMembers = Common.toQ(loopHeader).reverseOn(dominanceFrontierEdges).eval().nodes();
-		Q dag = cfg.differenceEdges(Common.toQ(backEdges));
-		loopMembers = Common.toQ(loopMembers).difference(dag.reverse(Common.toQ(loopHeader)))
-				.union(Common.toQ(loopHeader)).eval().nodes();
-		return Common.toQ(loopMembers);
 	}
-
+	
 	private void preprocess() {
 		kmalloc = CommonQueries.functions("kmalloc");
 		kfree = CommonQueries.functions("kfree");
@@ -299,10 +296,10 @@ public class LoopModel {
 		kmalloconly = new AtlasHashSet<Node>();
 		kfreeonly = new AtlasHashSet<Node>();
 		AtlasSet<Node> mOnly = kmallocCallers.difference(kfreeCallers).eval().nodes();
-		// ---start added
+		// ---start added			
 		AtlasSet<Node> withoutWrapper = kmallocCallers.difference(Common.toQ(mOnly)).eval().nodes();
-		AtlasSet<Node> allmallocCallers = Common.toQ(withoutWrapper).union(Common.toQ(mOnly)).eval().nodes();
-		// --end added
+		AtlasSet<Node> allmallocCallers = Common.toQ(withoutWrapper).union(Common.toQ(mOnly)).eval().nodes();	
+		//--end added
 		kmalloconly.addAll(mOnly);
 		kmalloconly.addAll(kmalloc.eval().nodes());
 		AtlasSet<Node> fonly = kfreeCallers.difference(kmallocCallers).eval().nodes();
@@ -314,4 +311,6 @@ public class LoopModel {
 		firstEeventInsideLoopSecondInsideFunctionNum = 0L;
 		firstEeventInsideLoopSecondNotInsideFunctionNum = 0L;
 	}
+	
+	
 }

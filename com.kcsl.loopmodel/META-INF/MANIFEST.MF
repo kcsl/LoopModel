@@ -14,7 +14,9 @@ Require-Bundle: org.eclipse.ui,
  com.ensoftcorp.atlas.db.common;bundle-version="3.7.1",
  com.ensoftcorp.atlas.db.implementation;bundle-version="3.7.1",
  com.ensoftcorp.open.c.commons;bundle-version="3.7.0",
- com.ensoftcorp.open.c.commons.ui;bundle-version="3.7.0"
+ com.ensoftcorp.open.c.commons.ui;bundle-version="3.7.0",
+ com.ensoftcorp.atlas.jimple.core;bundle-version="3.7.1",
+ com.ensoftcorp.open.jimple.commons;bundle-version="3.7.0"
 Bundle-RequiredExecutionEnvironment: JavaSE-11
 Automatic-Module-Name: com.kcsl.loopmodel
 Bundle-ActivationPolicy: lazy

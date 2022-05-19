@@ -207,11 +207,11 @@ public class Utils {
 	
 	
 	private static File createContainingDirectory(Path path, Node loopHeader, String category, String signatureName){
-		//String sc = FormattedSourceCorrespondence.getSourceCorrespondent(loopHeader).toString();
-		SourceCorrespondence sourceCorrespondence = (SourceCorrespondence) loopHeader.getAttr(XCSG.sourceCorrespondence);
+		String sc = FormattedSourceCorrespondence.getSourceCorrespondent(loopHeader).toString();
+		//SourceCorrespondence sourceCorrespondence = (SourceCorrespondence) loopHeader.getAttr(XCSG.sourceCorrespondence);
 		String sourceCorrespondenceString = "<external>";
-		if(sourceCorrespondence != null){
-			sourceCorrespondenceString = fixSlashes(sourceCorrespondence.toString());
+		if(sc != null){
+			sourceCorrespondenceString = fixSlashes(sc);
 		}
 
 		String containingDirectoryName = String.format(EVENT_GRAPH_DIRECTORY_NAME_PATTERN, category, loopHeader.addressBits(), sourceCorrespondenceString, signatureName);
@@ -225,6 +225,8 @@ public class Utils {
 		}
 		return currentGraphsOutputDirectory;
 	}
+	
+	
 	
 
 }
